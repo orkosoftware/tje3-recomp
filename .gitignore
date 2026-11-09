@@ -1,0 +1,7 @@
+/build/
+/original/
+/userdata/
+*.iso
+*.xbe
+*.xbx
+__pycache__/

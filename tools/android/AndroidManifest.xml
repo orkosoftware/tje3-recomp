@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          package="com.orkosoftware.tje3" android:versionCode="1" android:versionName="1.0">
+  <uses-feature android:name="android.hardware.vulkan.version" android:version="0x401000" android:required="true"/>
+  <application android:label="ToeJam &amp; Earl III" android:icon="@mipmap/ic_launcher" android:hasCode="false" android:extractNativeLibs="true"
+               android:hasFragileUserData="true" android:isGame="true" android:appCategory="game">
+    <activity android:name="android.app.NativeActivity" android:exported="true"
+              android:screenOrientation="landscape"
+              android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density"
+              android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+      <meta-data android:name="android.app.lib_name" android:value="tje3"/>
+      <meta-data android:name="android.app.func_name" android:value="tje_activity_create"/>
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+        <category android:name="android.intent.category.GAME"/>
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>
