@@ -13,6 +13,7 @@ namespace tje::gpu {
 
 struct Options {
     int scale = 2;            // internal resolution = 640x480 * scale
+    bool scale_forced = false;  // --scale was given: it wins over the resolution option
     bool vsync = false;       // the game paces itself with BlockUntilVerticalBlank
     bool linear_filter = true;  // filter when scaling to the window
     int window_width = 1280, window_height = 960;
@@ -89,7 +90,12 @@ struct Draw {
     float fog_start = 0, fog_end = 1, fog_density = 1;  // D3DRS_SHADOWFUNC (OpenGL compare function) for depth textures
 
     float surface_w = 640, surface_h = 480, zmax = 16777215.0f;
+    bool flat = false;        // drawn by the game's 2D camera (menus, HUD): keeps its shape in widescreen
 };
+
+// Widescreen: how many times wider than 4:3 the picture is now (1 = not widescreen).
+float wide_factor();
+void update_video();             // re-reads the picture options (every frame)
 
 bool init(const Options& o);     // window + Vulkan; false = stay headless
 bool active();

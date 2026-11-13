@@ -102,6 +102,7 @@ struct Surface {
     VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
     uint32_t addr = 0, nw = 0, nh = 0;           // guest address, size in Xbox pixels
     bool depth = false;
+    bool wide = false;                           // stretched sideways for widescreen
     // Shadow maps (depth surfaces sampled as textures): with the shadow_enhance
     // option, casters drawn by animated (matrix-palette) vertex programs go to a
     // second depth layer, so receivers can tell overlapping shadows apart.
@@ -116,6 +117,18 @@ Surface* g_pass_depth = nullptr;                 // depth layer of the open rend
 Surface* g_cur_depth = nullptr;
 Surface* g_back = nullptr;                       // what Swap shows
 uint32_t g_rt_w = 0, g_rt_h = 0;                 // current target, in Vulkan pixels
+
+// Picture options (tje3.ini), re-read every frame so they apply while playing.
+struct Video {
+    int mode = 0;             // 0 original 4:3, 1 widescreen, 2 stretch, 3 sharp
+    int scale = 2;            // render target pixels per Xbox pixel
+    float wide = 1.0f;        // screen-sized targets are this many times wider (widescreen)
+    bool smooth = true, vsync = false;
+} g_video;
+struct TargetArgs { uint32_t color = 0, cw = 0, ch = 0, depth = 0, dw = 0, dh = 0; bool set = false; };
+TargetArgs g_last_target, g_last_back;
+bool g_video_logged = false;
+bool g_frame_3d = false;           // something other than 2D was drawn to the screen this frame
 VkDescriptorSetLayout g_dsl = VK_NULL_HANDLE;
 VkPipelineLayout g_pl = VK_NULL_HANDLE;
 Image g_dummy2d, g_dummycube;
@@ -488,7 +501,7 @@ bool create_swapchain() {
     std::vector<VkPresentModeKHR> modes(n);
     vkGetPhysicalDeviceSurfacePresentModesKHR(g_phys, g_surface, &n, modes.data());
     VkPresentModeKHR mode = VK_PRESENT_MODE_FIFO_KHR;
-    if (!g_opt.vsync) {
+    if (!g_video.vsync) {
         for (auto m : modes) if (m == VK_PRESENT_MODE_MAILBOX_KHR) mode = m;
         if (mode == VK_PRESENT_MODE_FIFO_KHR)
             for (auto m : modes) if (m == VK_PRESENT_MODE_IMMEDIATE_KHR) mode = m;
@@ -594,7 +607,9 @@ Surface* get_surface(uint32_t addr, uint32_t nw, uint32_t nh, bool depth) {
     sf->nw = nw;
     sf->nh = nh;
     sf->depth = depth;
-    uint32_t w = nw * g_opt.scale, h = nh * g_opt.scale;
+    sf->wide = g_video.wide > 1.0f && nw == kSurfaceW && nh == kSurfaceH;
+    uint32_t w = nw * g_video.scale, h = nh * g_video.scale;
+    if (sf->wide) w = ((uint32_t)(w * g_video.wide + 0.5f) + 1) & ~1u;
     if (depth) {
         if (!make_image(w, h, 1, false, g_depth_format,
                         VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_ASPECT_DEPTH_BIT,
@@ -1296,6 +1311,8 @@ bool init(const Options& o) {
     std::lock_guard<std::recursive_mutex> lk(g_mu);
     g_opt = o;
     if (g_opt.scale < 1) g_opt.scale = 1;
+    g_video.scale = g_opt.scale;
+    g_video.vsync = g_opt.vsync || setting_bool("vsync");
     NativeWindow win;
     if (!window_create(o.window_width, o.window_height, o.fullscreen, "ToeJam & Earl III", &win)) {
         hle_log("[gpu] no window: running headless");
@@ -1312,7 +1329,7 @@ bool init(const Options& o) {
             g_stats_every = 0;
     }
     g_active = true;
-    hle_log("[gpu] rendering at %d x the Xbox resolution", g_opt.scale);
+    update_video();
     return true;
 }
 
@@ -1421,15 +1438,18 @@ void set_render_target(uint32_t color, uint32_t cw, uint32_t ch, uint32_t depth,
     // No depth buffer, or a smaller one than the colour target: a private one of the right size.
     Surface* d = (depth && dw >= cw && dh >= ch) ? get_surface(depth, dw, dh, true) : get_surface(0, cw, ch, true);
     if (!c || !d) return;
-    if (back) g_back = c;
+    g_last_target = {color, cw, ch, depth, dw, dh, true};
+    if (back) { g_back = c; g_last_back = g_last_target; }
     if (c == g_cur_color && d == g_cur_depth) return;
     end_pass();
     g_cur_color = c;
     g_cur_depth = d;
     g_pass_depth = d;
-    g_rt_w = cw * g_opt.scale;
-    g_rt_h = ch * g_opt.scale;
+    g_rt_w = c->img.w;
+    g_rt_h = c->img.h;
 }
+
+float wide_factor() { return g_active ? g_video.wide : 1.0f; }
 
 void clear(uint32_t flags, uint32_t color, float z, uint32_t stencil, const int32_t* rects, uint32_t nrects) {
     if (!g_active || !g_cur_color) return;
@@ -1454,13 +1474,14 @@ void clear(uint32_t flags, uint32_t color, float z, uint32_t stencil, const int3
     }
     if (!n) return;
     std::vector<VkClearRect> r;
-    uint32_t s = g_opt.scale;
+    const float sx = (float)g_rt_w / g_cur_color->nw, sy = (float)g_rt_h / g_cur_color->nh;
     if (!nrects) r.push_back({{{0, 0}, {g_rt_w, g_rt_h}}, 0, 1});
     for (uint32_t i = 0; i < nrects; i++) {
         int32_t x1 = std::max(0, rects[i * 4]), y1 = std::max(0, rects[i * 4 + 1]);
         int32_t x2 = std::min<int32_t>(g_cur_color->nw, rects[i * 4 + 2]), y2 = std::min<int32_t>(g_cur_color->nh, rects[i * 4 + 3]);
         if (x2 <= x1 || y2 <= y1) continue;
-        r.push_back({{{(int32_t)(x1 * s), (int32_t)(y1 * s)}, {(uint32_t)(x2 - x1) * s, (uint32_t)(y2 - y1) * s}}, 0, 1});
+        r.push_back({{{(int32_t)(x1 * sx), (int32_t)(y1 * sy)},
+                      {(uint32_t)((x2 - x1) * sx), (uint32_t)((y2 - y1) * sy)}}, 0, 1});
     }
     if (!r.empty()) vkCmdClearAttachments(g_frames[g_fi].cmd, n, att, (uint32_t)r.size(), r.data());
     if ((flags & 3) && g_cur_depth->alt && !r.empty()) {        // the shadow layer clears with it
@@ -1709,7 +1730,12 @@ void draw(const Draw& d) {
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
     uint32_t dyn[2] = {(uint32_t)vs_off, (uint32_t)ps_off};
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_pl, 0, 1, &set, 2, dyn);
-    float pc[4] = {d.surface_w, d.surface_h, d.zmax, 0.0f};
+    // 2D in widescreen keeps its shape. Only plain colour (a fade) may reach out to the
+    // screen's sides; a picture never does, since that would stretch it. Negative = no reaching.
+    if (!d.flat && g_cur_color == g_back) g_frame_3d = true;
+    float flat_scale = (d.flat && g_cur_color->wide) ? 1.0f / g_video.wide : 0.0f;
+    if (d.tex[0].addr) flat_scale = -flat_scale;
+    float pc[4] = {d.surface_w, d.surface_h, d.zmax, flat_scale};
     vkCmdPushConstants(cb, g_pl, VK_SHADER_STAGE_VERTEX_BIT, 0, 16, pc);
     float bc[4];
     rgba_from_d3dcolor(d.rs.blend_color, bc);
@@ -1726,6 +1752,46 @@ void draw(const Draw& d) {
         vkCmdDraw(cb, d.count, 1, 0, 0);
     }
     g_stat_draws++;
+}
+
+// Reads the picture options; when the size of the render targets changes, they
+// are all thrown away (the game redraws everything each frame) and made again.
+void update_video() {
+    Video v;
+    v.mode = setting_int("display_mode");
+    v.smooth = setting_bool("smoothing");
+    v.vsync = g_opt.vsync || setting_bool("vsync");
+    const uint32_t W = g_sc_extent.width, H = g_sc_extent.height;
+    int res = setting_int("resolution");
+    if (g_opt.scale_forced) res = g_opt.scale;
+    if (res <= 0) res = H ? (int)((H + kSurfaceH - 1) / kSurfaceH) : 2;      // match the screen
+    v.scale = std::min(std::max(res, 1), 6);
+    const double shape = H ? (double)W / H : 4.0 / 3;
+    v.wide = (v.mode == 1 && shape > 4.0 / 3 + 0.02) ? (float)(std::min(shape, 3.6) / (4.0 / 3)) : 1.0f;
+    const bool resize = v.scale != g_video.scale || std::fabs(v.wide - g_video.wide) > 0.001f;
+    const bool swap = v.vsync != g_video.vsync;
+    const bool first = !g_video_logged;
+    g_video = v;
+    if (swap) g_sc_dirty = true;
+    if (resize || first) {
+        g_video_logged = true;
+        hle_log("[gpu] picture: mode %d, %d x the Xbox resolution, %.3f x as wide, %s, vsync %d", v.mode, v.scale,
+                v.wide, v.smooth ? "smooth" : "sharp", (int)v.vsync);
+    }
+    if (!resize || g_surfaces.empty()) return;
+    vkDeviceWaitIdle(g_dev);
+    for (auto& [key, fb] : g_framebuffers) vkDestroyFramebuffer(g_dev, fb, nullptr);
+    g_framebuffers.clear();
+    for (auto& [key, sf] : g_surfaces) {
+        if (sf->sample_view && sf->sample_view != sf->img.view) vkDestroyImageView(g_dev, sf->sample_view, nullptr);
+        destroy_image(sf->img);
+        delete sf;
+    }
+    g_surfaces.clear();
+    g_cur_color = g_cur_depth = g_pass_depth = g_back = nullptr;
+    const TargetArgs back = g_last_back, last = g_last_target;
+    if (back.set) set_render_target(back.color, back.cw, back.ch, back.depth, back.dw, back.dh, true);
+    if (last.set) set_render_target(last.color, last.cw, last.ch, last.depth, last.dw, last.dh, false);
 }
 
 void present() {
@@ -1755,7 +1821,8 @@ void present() {
         }
     }
     static uint32_t frame_no = 0;
-    bool stats = back && g_stats_every && ++frame_no % g_stats_every == 0;
+    bool stats = back && g_stats_every && ++frame_no % g_stats_every == 0 &&
+                 (VkDeviceSize)back->img.w * back->img.h * 4 <= g_readback.size;
     if (stats) {
         VkBufferImageCopy r{};
         r.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
@@ -1769,20 +1836,36 @@ void present() {
         VkClearColorValue black{};
         VkImageSubresourceRange rr{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         vkCmdClearColorImage(cb, sc, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &rr);
-        // 4:3, centred
+        // Centred, in the shape the display mode asks for.
         uint32_t W = g_sc_extent.width, H = g_sc_extent.height;
-        uint32_t w = W, h = W * 3 / 4;
-        if (h > H) { h = H; w = H * 4 / 3; }
-        int32_t x0 = (int32_t)(W - w) / 2, y0 = (int32_t)(H - h) / 2;
+        uint32_t w = W, h = H;
+        bool smooth = g_video.smooth;
+        // A widescreen frame with only 2D in it (title, menus, loading): nothing drew the
+        // sides, so show just the 4:3 middle, on black.
+        const bool crop = back && back->wide && !g_frame_3d;
+        const int32_t side = crop ? (int32_t)((back->img.w - back->img.w / g_video.wide) / 2) : 0;
+        g_frame_3d = false;
+        if (g_video.mode == 3) {                                 // sharp: a whole number of screen pixels each
+            uint32_t n = std::max(1u, std::min(W / kSurfaceW, H / kSurfaceH));
+            w = kSurfaceW * n;
+            h = kSurfaceH * n;
+            smooth = false;
+        } else if (g_video.mode != 2 && back) {                  // keep the picture's shape
+            const double shape = crop ? 4.0 / 3 : (double)back->img.w / back->img.h;
+            w = (uint32_t)(H * shape + 0.5);
+            if (w > W) { w = W; h = (uint32_t)(W / shape + 0.5); }
+        }
+        int32_t x0 = ((int32_t)W - (int32_t)w) / 2, y0 = ((int32_t)H - (int32_t)h) / 2;
         if (back) {
             VkImageBlit blit{};
             blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-            blit.srcOffsets[1] = {(int32_t)back->img.w, (int32_t)back->img.h, 1};
+            blit.srcOffsets[0] = {side, 0, 0};
+            blit.srcOffsets[1] = {(int32_t)back->img.w - side, (int32_t)back->img.h, 1};
             blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
             blit.dstOffsets[0] = {x0, y0, 0};
             blit.dstOffsets[1] = {x0 + (int32_t)w, y0 + (int32_t)h, 1};
             vkCmdBlitImage(cb, back->img.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, sc, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-                           &blit, g_opt.linear_filter ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
+                           &blit, smooth ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
         }
         barrier(cb, sc, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, 0, VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -1848,7 +1931,7 @@ void present() {
         if (const char* reg = std::getenv("TJE_GPU_REGION")) {      // x,y,w,h in Xbox pixels: mean colour there
             int rx = 0, ry = 0, rw = 0, rh = 0;
             std::sscanf(reg, "%d,%d,%d,%d", &rx, &ry, &rw, &rh);
-            uint32_t sc = (uint32_t)g_opt.scale, W = back->img.w;
+            uint32_t sc = back->img.h / back->nh, W = back->img.w;
             double m[3] = {};
             uint64_t cnt = 0;
             for (uint32_t y = ry * sc; y < (uint32_t)(ry + rh) * sc && y < back->img.h; y++)
@@ -1884,6 +1967,7 @@ void present() {
         g_stat_frames = g_stat_draws = g_stat_uploads = 0;
         g_stat_t0 = now;
     }
+    update_video();
 }
 
 }  // namespace tje::gpu

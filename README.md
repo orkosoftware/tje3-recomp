@@ -41,6 +41,9 @@ on first launch. It's built from your disc, so please don't share it.
 
 - Xbox-style controllers work. Keyboard: arrows = d-pad, Enter = Start, Esc = Back, Z/Space = A, X = B, A = X, S = Y,
   Q/W = triggers, C/V = white/black.
+- **Display Settings** is at the bottom of the game's Options menu: Original 4:3, true Widescreen (a wider view, with
+  menus and HUD kept in shape), Stretch or Sharp Pixels, plus resolution, smoothing, V-Sync and fullscreen. Changes
+  apply straight away. `TJE3.exe` has a Settings button with the same options and a few more.
 - Alt+Enter switches between fullscreen and a window. **Exit Game** is at the bottom of the main menu.
 - In the install folder, options are in `tje3.ini` and saved games are in `userdata`.
 - To add downloadable content later, copy each pack's folder into `DLC` in the install folder.

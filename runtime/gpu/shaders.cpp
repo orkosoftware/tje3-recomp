@@ -88,7 +88,7 @@ std::string vertex_glsl(const uint32_t* program, uint32_t len) {
     }
     std::string s;
     s += "#version 450\n";
-    s += "layout(push_constant) uniform PC { vec4 surface; } pc;\n";   // w, h, zmax
+    s += "layout(push_constant) uniform PC { vec4 surface; } pc;\n";   // w, h, zmax, 2D width scale (0 = none)
     s += "layout(set = 0, binding = 0, std140) uniform VS { vec4 c[192]; vec4 vdef[16]; uint mask; } vs;\n";
     for (int i = 0; i < 16; i++) s += fmt("layout(location = %d) in vec4 in_v%d;\n", i, i);
     s += "layout(location = 0) out vec4 out_d0;\nlayout(location = 1) out vec4 out_d1;\n"
@@ -184,6 +184,9 @@ std::string vertex_glsl(const uint32_t* program, uint32_t len) {
          "  float w = p.w;\n"
          "  if (w == 0.0 || isinf(w) || isnan(w)) w = 1.0;\n"
          "  vec3 ndc = vec3(p.x * 2.0 / pc.surface.x - 1.0, p.y * 2.0 / pc.surface.y - 1.0, p.z / pc.surface.z);\n"
+         // Widescreen: 2D keeps its shape in the middle; edges that touch the screen's sides stay there,
+         // so full-screen fades and backdrops still cover everything.
+         "  if (pc.surface.w < 0.0 || (pc.surface.w > 0.0 && abs(abs(ndc.x) - 1.0) > 0.004)) ndc.x *= abs(pc.surface.w);\n"
          "  gl_Position = vec4(ndc * w, w);\n"
          "  gl_PointSize = 1.0;\n"
          "  out_d0 = clamp(oD0, 0.0, 1.0);\n  out_d1 = clamp(oD1, 0.0, 1.0);\n"

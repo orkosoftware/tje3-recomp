@@ -193,6 +193,7 @@ void window_client_size(int* w, int* h) {
     *h = g_window ? ANativeWindow_getHeight(g_window) : 0;
 }
 
+void window_set_fullscreen(bool) {}
 bool window_take_resized() { return g_resized.exchange(false); }
 uint32_t window_keys() { return g_keys.load() | g_hat.load(); }
 HandheldPad window_pad() { return {g_lx, g_ly, g_rx, g_ry, g_lt, g_rt}; }

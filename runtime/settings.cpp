@@ -18,7 +18,19 @@ namespace {
 
 struct Option { const char* key; const char* value; const char* comment; };
 
+#ifdef __ANDROID__
+#define TJE_DEFAULT_RESOLUTION "1"
+#define TJE_DEFAULT_VSYNC "1"
+#else
+#define TJE_DEFAULT_RESOLUTION "0"
+#define TJE_DEFAULT_VSYNC "0"
+#endif
+
 const Option kOptions[] = {
+    {"display_mode", "0", "picture shape: 0 = original 4:3 with black bars, 1 = widescreen (see more to the sides), 2 = stretch to fill, 3 = sharp (whole-number scaling)"},
+    {"resolution", TJE_DEFAULT_RESOLUTION, "render resolution: 0 = match the screen, 1 to 4 = that many times the Xbox's 640x480"},
+    {"smoothing", "1", "1: smooth the picture when it is scaled to the screen; 0: hard pixel edges"},
+    {"vsync", TJE_DEFAULT_VSYNC, "1: show frames in step with the screen (no tearing); 0: show them as soon as they are ready"},
     {"fullscreen", "1", "1: start in fullscreen on the main monitor; 0: start in a window (--window <w>x<h> also starts in one)"},
     {"invert_camera_x", "1", "1: right stick right turns the camera right (the original turns it left); look mode is not affected"},
     {"invert_look_y", "1", "1: in look mode (left trigger held) up looks up (the original is flight-style)"},
@@ -68,7 +80,29 @@ void reload_if_changed_locked() {
     hle_log("[settings] reloaded:%s", summary.c_str());
 }
 
+void write_file_locked() {
+    if (FILE* f = std::fopen(g_path.c_str(), "w")) {
+        std::fprintf(f, "# ToeJam & Earl III options\n");
+        for (const Option& o : kOptions) std::fprintf(f, "\n# %s\n%s = %s\n", o.comment, o.key, g_values[o.key].c_str());
+        for (auto& [k, v] : g_values) {
+            bool known = false;
+            for (const Option& o : kOptions) known |= k == o.key;
+            if (!known) std::fprintf(f, "%s = %s\n", k.c_str(), v.c_str());
+        }
+        std::fclose(f);
+    }
+    std::error_code ec;
+    g_mtime = std::filesystem::last_write_time(g_path, ec);
+}
+
 }  // namespace
+
+void setting_set(const char* key, int value) {
+    std::lock_guard<std::mutex> lk(g_m);
+    g_values[key] = std::to_string(value);
+    if (!g_path.empty()) write_file_locked();
+    hle_log("[settings] %s = %d", key, value);
+}
 
 void settings_load(const std::string& user_dir) {
     std::lock_guard<std::mutex> lk(g_m);
@@ -80,20 +114,7 @@ void settings_load(const std::string& user_dir) {
     bool missing = false;
     for (const Option& o : kOptions)
         if (!g_values.count(o.key)) { g_values[o.key] = o.value; missing = true; }
-    if (missing) {
-        if (FILE* f = std::fopen(path.c_str(), "w")) {
-            std::fprintf(f, "# ToeJam & Earl III options\n");
-            for (const Option& o : kOptions) std::fprintf(f, "\n# %s\n%s = %s\n", o.comment, o.key, g_values[o.key].c_str());
-            for (auto& [k, v] : g_values) {
-                bool known = false;
-                for (const Option& o : kOptions) known |= k == o.key;
-                if (!known) std::fprintf(f, "%s = %s\n", k.c_str(), v.c_str());
-            }
-            std::fclose(f);
-        }
-        std::error_code ec2;
-        g_mtime = std::filesystem::last_write_time(path, ec2);
-    }
+    if (missing) write_file_locked();
     std::string summary;
     for (auto& [k, v] : g_values) summary += " " + k + "=" + v;
     hle_log("[settings] %s:%s", path.c_str(), summary.c_str());

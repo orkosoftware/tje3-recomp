@@ -394,14 +394,21 @@ def build_android(game, work, ndk):
     print(f"Android app written to {out}. See 'How to install on Android.txt' in that folder.", flush=True)
 
 
-def install(source, game, dlc, android=False, ndk=None):
+def install(source, game, dlc, android=False, ndk=None, rebuild=False):
+    """rebuild: a newer release was unpacked over an install. The game files are already
+    in place, so only the program is translated and compiled again; saves, options and
+    downloadable content stay as they are."""
     progress(1, "Checking your copy of the game")
-    size = inspect_source(source)
-    prepare_destination(game, source, size + (ANDROID_SPACE if android else 0))
     exe = os.path.join(game, "tje3.exe")
+    if rebuild:
+        inspect_source(os.path.join(game, "data"))
+    else:
+        size = inspect_source(source)
+        prepare_destination(game, source, size + (ANDROID_SPACE if android else 0))
     if os.path.exists(exe):
         os.remove(exe)
-    copy_game_data(game, source)
+    if not rebuild:
+        copy_game_data(game, source)
     if dlc:
         progress(21, "Adding downloadable content")
         print(f"{copy_dlc(game, dlc)} downloadable content pack(s) added.", flush=True)
@@ -431,6 +438,7 @@ def install(source, game, dlc, android=False, ndk=None):
         except (SetupError, android_build.BuildError, OSError) as e:
             print(f"The Windows game is ready, but the Android app couldn't be built: {e}", flush=True)
     shutil.rmtree(work)
+    shutil.copyfile(os.path.join(HERE, "version.txt"), os.path.join(game, "kit_version.txt"))
     progress(100, "Done")
 
 
@@ -460,6 +468,7 @@ def main():
     parser.add_argument("--dlc", action="append", default=[])
     parser.add_argument("--android", action="store_true", help="also build an APK (the player has accepted Google's terms)")
     parser.add_argument("--ndk", help="an Android NDK already on this PC, instead of downloading one")
+    parser.add_argument("--rebuild", action="store_true", help="compile again from the game files already installed")
     parser.add_argument("--check-source")
     parser.add_argument("--check-dlc", action="append")
     args = parser.parse_args()
@@ -469,10 +478,10 @@ def main():
     if args.check_dlc is not None:
         check_dlc(args.check_dlc)
         return 0
-    if not args.source:
+    if not args.source and not args.rebuild:
         parser.error("--source is required")
     try:
-        install(args.source, os.path.abspath(args.dest), args.dlc, args.android, args.ndk)
+        install(args.source, os.path.abspath(args.dest), args.dlc, args.android, args.ndk, args.rebuild)
     except (SetupError, OSError, subprocess.CalledProcessError) as e:
         print(f"Setup stopped: {e}", flush=True)
         return 1

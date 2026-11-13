@@ -122,7 +122,7 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--user")) { user = argv[++i]; user_given = true; }
         else if (!std::strcmp(argv[i], "--log")) log_path = argv[++i];
         else if (!std::strcmp(argv[i], "--dlc")) dlc = argv[++i];
-        else if (!std::strcmp(argv[i], "--scale")) gopt.scale = std::atoi(argv[++i]);
+        else if (!std::strcmp(argv[i], "--scale")) { gopt.scale = std::atoi(argv[++i]); gopt.scale_forced = true; }
         else if (!std::strcmp(argv[i], "--window")) { windowed = true; std::sscanf(argv[++i], "%dx%d", &gopt.window_width, &gopt.window_height); }
     }
     // Without --log the log goes to <user dir>/tje3.log, so a crash leaves a record.
@@ -145,7 +145,6 @@ int main(int argc, char** argv) {
     });
 
 #ifdef __ANDROID__
-    gopt.scale = 1;                              // the Xbox's own resolution until a handheld proves it can do more
     gopt.vsync = true;                           // show each frame on a screen refresh
     gpu::init(gopt);                             // first, so unpacking can show its progress
     if (!gpu::android_unpack_game_files()) return 1;

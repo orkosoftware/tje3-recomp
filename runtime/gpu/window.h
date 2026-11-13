@@ -14,6 +14,7 @@ bool window_create(int width, int height, bool fullscreen, const char* title, Na
 void window_set_title(const std::string& t);
 void window_client_size(int* w, int* h);
 bool window_take_resized();
+void window_set_fullscreen(bool on);    // Windows; elsewhere the app always fills the screen
 
 // Keyboard as a gamepad (until real controller input).
 enum : uint32_t {

@@ -8,6 +8,8 @@
 #include <commdlg.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <dwmapi.h>
+#include <uxtheme.h>
 
 #include <string>
 #include <vector>
@@ -362,13 +364,33 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcW(h, msg, wp, lp);
 }
 
+#include "launcher_home.inc"
+
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR args, int show) {
     g_dir = exe_dir();
     load_location();
-    if (exists(g_game + L"\\tje3.exe") && !wcsstr(args, L"--setup")) {
-        if (play(args)) return 0;
+    // The game is compiled on this PC, so a newer release has to compile it again. The game
+    // files from the first setup are still there: no disc is needed.
+    auto small_file = [](const std::wstring& path) {
+        std::string text;
+        HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+        if (f == INVALID_HANDLE_VALUE) return text;
+        char buf[64];
+        DWORD n = 0;
+        if (ReadFile(f, buf, sizeof buf, &n, nullptr)) text.assign(buf, n);
+        CloseHandle(f);
+        return text;
+    };
+    const std::string kit = small_file(g_dir + L"\\setup\\version.txt");
+    const bool update = !kit.empty() && exists(g_game + L"\\data\\default.xbe") && !wcsstr(args, L"--setup") &&
+                        small_file(g_game + L"\\kit_version.txt") != kit;
+    if (!update && exists(g_game + L"\\tje3.exe") && !wcsstr(args, L"--setup")) {
+        // Straight to the game if the player asked for that; otherwise Play / Settings first.
+        const bool straight = exists(skip_path()) && !(GetKeyState(VK_SHIFT) & 0x8000) && !wcsstr(args, L"--settings");
+        if (!straight && !run_home(inst, show)) return 0;
+        if (play(straight ? args : L"")) return 0;
     }
     if (!exists(g_dir + L"\\setup\\setup.py")) {
         MessageBoxW(nullptr, L"The setup folder is missing. Unpack the whole release into one folder.", kTitle, MB_ICONERROR);
@@ -395,6 +417,11 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR args, int show) {
     g_win = CreateWindowExW(0, wc.lpszClassName, kTitle, style, CW_USEDEFAULT, CW_USEDEFAULT,
                             r.right - r.left, r.bottom - r.top, nullptr, nullptr, inst, nullptr);
     build_ui();
+    if (update) {                    // a newer release over an existing install: no questions needed
+        SetWindowTextW(g_source, L"Using the game files already installed");
+        SetWindowTextW(g_status, L"Updating the game to this version...");
+        run_setup(TASK_INSTALL, L"--rebuild --dest " + quoted(g_game));
+    }
     ShowWindow(g_win, show);
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {

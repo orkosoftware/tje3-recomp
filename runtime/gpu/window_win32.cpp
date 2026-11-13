@@ -105,6 +105,9 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_KILLFOCUS:
         g_keys = 0;
         return 0;
+    case WM_APP + 1:                             // window_set_fullscreen, from the game's thread
+        if ((wp != 0) != g_fullscreen) { set_fullscreen(h, wp != 0); log_mode(h); }
+        return 0;
     case WM_ERASEBKGND:
         return 1;
     case WM_SETCURSOR:
@@ -173,6 +176,10 @@ void window_client_size(int* w, int* h) {
     if (g_hwnd) GetClientRect(g_hwnd, &r);
     *w = r.right - r.left;
     *h = r.bottom - r.top;
+}
+
+void window_set_fullscreen(bool on) {
+    if (g_hwnd) PostMessageW(g_hwnd, WM_APP + 1, on ? 1 : 0, 0);
 }
 
 bool window_take_resized() { return g_resized.exchange(false); }

@@ -31,7 +31,7 @@ constexpr uint32_t kGamepadHandle = 0x47504400;     // "GPD"
 bool g_reported_insertion = false;
 uint32_t g_packet = 0;
 
-struct Press { int64_t at_ms; std::string button; };
+struct Press { int64_t at_ms; std::string button; int64_t hold_ms; };   // "ms:button" or "ms:button:hold"
 std::vector<Press> g_script;
 std::chrono::steady_clock::time_point g_start = std::chrono::steady_clock::now();
 
@@ -49,7 +49,13 @@ void load_script() {
         std::string item = spec.substr(p, q - p);
         size_t colon = item.find(':');
         if (colon != std::string::npos)
-            g_script.push_back({std::atoll(item.substr(0, colon).c_str()), item.substr(colon + 1)});
+        {
+            std::string button = item.substr(colon + 1);
+            int64_t hold = 200;
+            size_t c2 = button.find(':');
+            if (c2 != std::string::npos) { hold = std::atoll(button.substr(c2 + 1).c_str()); button = button.substr(0, c2); }
+            g_script.push_back({std::atoll(item.substr(0, colon).c_str()), button, hold});
+        }
         p = q + 1;
     }
 }
@@ -117,7 +123,7 @@ void input_poll(uint32_t gamepad) {
     static const char* digital[] = {"up", "down", "left", "right", "start", "back", "lthumb", "rthumb"};
     static const char* analog[] = {"a", "b", "x", "y", "black", "white", "lt", "rt"};
     for (const Press& pr : g_script) {
-        if (now < pr.at_ms || now > pr.at_ms + 200) continue;     // held for 200 ms
+        if (now < pr.at_ms || now > pr.at_ms + pr.hold_ms) continue;
         for (int i = 0; i < 8; i++) {
             if (pr.button == digital[i]) W16(gamepad, R16(gamepad) | (1u << i));
             if (pr.button == analog[i]) W8(gamepad + 2 + i, 255);

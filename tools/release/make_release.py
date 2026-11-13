@@ -25,7 +25,7 @@ GAME_DATA = os.path.join(REPO, "original", "xiso_extracted")
 TOOLS = ["tools/recomp/build_game.py", "tools/recomp/lift.py", "tools/recomp/gen_hle_stubs.py",
          "tools/emu/xbe_image.py", "tools/xdvdfs_extract.py", "tools/xbox_texture.py",
          "tools/android/android_build.py", "tools/android/build_apk.py", "tools/android/AndroidManifest.xml"]
-RELEASE_TOOLS = ["setup.py", "launcher.cpp", "launcher.rc", "launcher.manifest", "make_release.py", "README_PUBLIC.md"]
+RELEASE_TOOLS = ["setup.py", "launcher.cpp", "launcher_home.inc", "launcher.rc", "launcher.manifest", "make_release.py", "README_PUBLIC.md"]
 NEVER_ANYWHERE = ["*.xbe", "*.iso", "*.xbx", "*.dmp", "lifted_*", "hle_libs_generated*"]
 NEVER_OURS = ["*.o", "*.obj", "*.pdb"]      # the compiler's own start-up objects are fine
 PYTHON_DLLS = ["_ctypes.pyd", "libffi-8.dll", "_queue.pyd", "select.pyd",
@@ -88,7 +88,7 @@ def build_launcher(dst):
     subprocess.run(["llvm-windres", "launcher.rc", "-o", tmp], cwd=here, check=True)
     subprocess.run(["clang++", "-O2", "-s", "-municode", "-mwindows", "-static", "-std=gnu++17",
                     f"-ffile-prefix-map={REPO}=.", "launcher.cpp", tmp, "-lcomctl32", "-lcomdlg32", "-lshell32",
-                    "-lole32", "-luuid", "-o", dst], cwd=here, check=True)
+                    "-lole32", "-luuid", "-ldwmapi", "-luxtheme", "-lgdi32", "-o", dst], cwd=here, check=True)
     os.remove(tmp)
 
 
@@ -194,12 +194,14 @@ def add_android(setup, sdk, shaderc, licenses):
                 "see their licence files here.\n")
 
 
-def package(dst, vulkan, android_sdk, shaderc):
+def package(dst, vulkan, android_sdk, shaderc, version):
     setup = os.path.join(dst, "setup")
     licenses = os.path.join(dst, "licenses")
     os.makedirs(licenses)
     build_launcher(os.path.join(dst, "TJE3.exe"))
     copy(os.path.join(REPO, "tools", "release", "setup.py"), os.path.join(setup, "setup.py"))
+    with open(os.path.join(setup, "version.txt"), "w", newline="\n") as f:
+        f.write(version + "\n")
     copy(os.path.join(REPO, "tools", "release", "README_PUBLIC.md"), os.path.join(dst, "README.txt"))
     source_tree(os.path.join(setup, "src"))
     add_third_party(setup, vulkan, licenses)
@@ -313,7 +315,7 @@ def main():
     a.add_argument("--vulkan", required=True)
     a.add_argument("--android-sdk", required=True)
     a.add_argument("--shaderc", required=True, help="folder of shaderc .a files built for arm64-v8a")
-    a.add_argument("--version", default="v1.0.0")
+    a.add_argument("--version", default="v1.0.1")
     a.add_argument("--no-zip", action="store_true")
     args = a.parse_args()
     out = os.path.abspath(args.out)
@@ -321,7 +323,7 @@ def main():
         shutil.rmtree(out)
     repo, pkg = os.path.join(out, "repo"), os.path.join(out, "package")
     public_repo(repo)
-    package(pkg, args.vulkan, args.android_sdk, args.shaderc)
+    package(pkg, args.vulkan, args.android_sdk, args.shaderc, args.version)
     problems = audit([repo, pkg])
     if problems:
         print("\n".join(problems[:50]))

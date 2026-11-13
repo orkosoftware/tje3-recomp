@@ -28,6 +28,8 @@
 
 namespace tje {
 
+constexpr uint32_t kActiveCamera = 0x263880;
+
 void log_backtrace(Cpu*, const char*);
 
 namespace {
@@ -361,6 +363,7 @@ void build_draw(gpu::Draw& d, uint32_t prim, uint32_t count) {
     Desc rt = describe(g_render_target);
     d.surface_w = (float)rt.width;
     d.surface_h = (float)rt.height;
+    d.flat = R32(kActiveCamera + 0x3c) == 0x3f800000;     // an orthographic projection: the game's 2D camera
     d.zmax = g_zbuffer ? depth_range(describe(g_zbuffer).format) : 16777215.0f;
     d.fog_color = g_fog_color;
 }
@@ -883,6 +886,31 @@ void hle_0016c300(Cpu* c) { D3DLOG(c, "D3DDevice_SetVertexData2f");
 }
 
 // ---------------------------------------------------------------- state
+
+// The game's active camera (a copy made by 0xf2410 before it draws with one):
+// +0x00 projection, +0x40 view, +0x88 width and height, +0xb0 pixel shape,
+// +0xc8 the side clipping plane used for culling.
+// Widescreen keeps the height of the view and widens it: a narrower X scale,
+// and side planes to match so nothing at the new edges is culled. Computed
+// from the Y scale each time, so a camera that was saved and restored isn't
+// widened twice.
+void wrap_000f2410(Cpu* c) {
+    static const GuestFn set_camera = lookup(0xf2410);
+    set_camera(c);
+    const float wide = gpu::wide_factor();
+    const uint32_t cam = kActiveCamera;
+    if (R32(cam + 0x3c) != 0 || f32(R32(cam + 0x38)) != -1.0f) return;           // not a perspective camera
+    const float w = f32(R32(cam + 0x88)), h = f32(R32(cam + 0x8c)), shape = f32(R32(cam + 0xb0));
+    if (w != 640.0f || h != 480.0f || shape <= 0.0f) return;                     // not drawing the screen
+    const float ys = f32(R32(cam + 0x14));
+    const float xs = ys / ((w / h) * shape) / wide;
+    if (!(xs > 0.0f)) return;
+    const float t = 1.0f / xs, r = 1.0f / std::sqrt(t * t + 1.0f);
+    auto put = [](uint32_t a, float v) { uint32_t u; std::memcpy(&u, &v, 4); W32(a, u); };
+    put(cam + 0x00, xs);
+    put(cam + 0xc8, r * t);
+    put(cam + 0xcc, -r);
+}
 
 // D3DDevice_SetViewport(pViewport {X, Y, Width, Height, MinZ, MaxZ})
 void hle_00166d20(Cpu* c) { D3DLOG(c, "D3DDevice_SetViewport");
