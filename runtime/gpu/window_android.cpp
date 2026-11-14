@@ -52,6 +52,10 @@ AAssetManager* g_assets = nullptr;
 std::atomic<bool> g_resized{false};
 std::atomic<uint32_t> g_keys{0}, g_hat{0};
 std::atomic<float> g_lx{0}, g_ly{0}, g_rx{0}, g_ry{0}, g_lt{0}, g_rt{0};
+std::atomic<float> g_tap_x{0}, g_tap_y{0};
+std::atomic<bool> g_tapped{false};
+std::atomic<uint32_t> g_pressed{0};
+ANativeActivity* g_activity = nullptr;
 
 uint32_t key_bit(int32_t code) {
     switch (code) {
@@ -79,7 +83,7 @@ int32_t on_input(android_app*, AInputEvent* e) {
     if (AInputEvent_getType(e) == AINPUT_EVENT_TYPE_KEY) {
         uint32_t bit = key_bit(AKeyEvent_getKeyCode(e));
         if (!bit) return 0;                 // volume and so on stay with the system
-        if (AKeyEvent_getAction(e) == AKEY_EVENT_ACTION_DOWN) g_keys |= bit;
+        if (AKeyEvent_getAction(e) == AKEY_EVENT_ACTION_DOWN) { g_keys |= bit; g_pressed |= bit; }
         else if (AKeyEvent_getAction(e) == AKEY_EVENT_ACTION_UP) g_keys &= ~bit;
         return 1;
     }
@@ -93,6 +97,13 @@ int32_t on_input(android_app*, AInputEvent* e) {
         g_rt = std::max(axis(AMOTION_EVENT_AXIS_RTRIGGER), axis(AMOTION_EVENT_AXIS_GAS));
         float hx = axis(AMOTION_EVENT_AXIS_HAT_X), hy = axis(AMOTION_EVENT_AXIS_HAT_Y);
         g_hat = (hy < -0.5f ? KEY_UP : 0) | (hy > 0.5f ? KEY_DOWN : 0) | (hx < -0.5f ? KEY_LEFT : 0) | (hx > 0.5f ? KEY_RIGHT : 0);
+        return 1;
+    }
+    if (AInputEvent_getType(e) == AINPUT_EVENT_TYPE_MOTION && (AInputEvent_getSource(e) & AINPUT_SOURCE_TOUCHSCREEN) &&
+        (AMotionEvent_getAction(e) & AMOTION_EVENT_ACTION_MASK) == AMOTION_EVENT_ACTION_UP) {
+        g_tap_x = AMotionEvent_getX(e, 0);
+        g_tap_y = AMotionEvent_getY(e, 0);
+        g_tapped = true;
         return 1;
     }
     return 0;
@@ -203,6 +214,23 @@ bool window_foreground() {
     return g_resumed && g_window;
 }
 
+void* android_activity() { return g_activity; }
+
+// Asks Android to close the activity; the process ends when it says the activity is gone.
+void android_finish() {
+    ANativeActivity_finish(g_activity);
+    for (int i = 0; i < 50; i++) usleep(100000);
+    _exit(0);
+}
+uint32_t android_take_pressed() { return g_pressed.exchange(0); }
+
+bool android_take_tap(float* x, float* y) {
+    if (!g_tapped.exchange(false)) return false;
+    *x = g_tap_x;
+    *y = g_tap_y;
+    return true;
+}
+
 void window_wait_foreground() {
     std::unique_lock<std::mutex> lk(g_m);
     g_cv.wait(lk, [] { return g_resumed && g_window; });
@@ -286,6 +314,7 @@ bool android_unpack_game_files() {
 void android_start(android_app* app) {
     g_files = app->activity->externalDataPath ? app->activity->externalDataPath : app->activity->internalDataPath;
     g_assets = app->activity->assetManager;
+    g_activity = app->activity;
     load_env();
     app->onAppCmd = on_command;
     app->onInputEvent = on_input;

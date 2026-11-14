@@ -148,6 +148,7 @@ int main(int argc, char** argv) {
     gopt.vsync = true;                           // show each frame on a screen refresh
     gpu::init(gopt);                             // first, so unpacking can show its progress
     if (!gpu::android_unpack_game_files()) return 1;
+    if (!gpu::android_import_game(exe_dir())) return 1;     // a shared build: the player's own disc supplies the files
 #endif
     std::vector<uint8_t> xbe = read_file(data + "/default.xbe");
     if (xbe.size() < 0x1000 || std::memcmp(xbe.data(), "XBEH", 4) != 0) {

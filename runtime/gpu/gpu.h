@@ -111,6 +111,7 @@ void draw(const Draw& d);
 void present();                  // end of frame: show the back buffer
 #ifdef __ANDROID__
 bool android_unpack_game_files();
+bool android_import_game(const std::string& files);     // android_import.cpp
 #endif
 // The guest may have written texture memory (LockRect, Register): textures are
 // re-checked against guest memory at their next use. Also implied by present().

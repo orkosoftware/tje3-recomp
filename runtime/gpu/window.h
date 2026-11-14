@@ -32,6 +32,13 @@ void window_wait_foreground();          // returns once the player is back in th
 void android_surface_lost();            // vulkan.cpp
 void android_surface_ready(void* window);
 void android_show_progress(float fraction);
+bool android_screen_size(uint32_t* w, uint32_t* h);
+bool android_show_pixels(const uint8_t* rgba, uint32_t w, uint32_t h);
+void* android_activity();               // the ANativeActivity
+bool android_take_tap(float* x, float* y);      // a finished touch, in screen pixels
+void android_finish();                  // closes the app the way Android expects; does not return
+uint32_t android_take_pressed();        // KEY_* bits pressed since the last call
+bool android_import_game(const std::string& files);     // android_import.cpp: first-launch setup from the player's disc
 #endif
 
 }  // namespace tje::gpu

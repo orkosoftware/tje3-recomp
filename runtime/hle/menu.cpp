@@ -127,6 +127,8 @@ void quit() {
     std::fflush(g_log);
 #ifdef _WIN32
     TerminateProcess(GetCurrentProcess(), 0);
+#elif defined(__ANDROID__)
+    gpu::android_finish();          // a process that just stops is restarted by Android
 #else
     std::_Exit(0);
 #endif

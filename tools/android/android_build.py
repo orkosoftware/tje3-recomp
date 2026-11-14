@@ -47,7 +47,7 @@ def ndk_bin(ndk):
     return os.path.join(ndk, "toolchains", "llvm", "prebuilt", "windows-x86_64", "bin")
 
 
-def compile_library(ndk, lifted, root, includes, shaderc_libs, out_dir, progress=None):
+def compile_library(ndk, lifted, root, includes, shaderc_libs, out_dir, progress=None, extra_flags=()):
     """Compiles the game for 64-bit ARM; returns the path of libtje3.so."""
     tools = ndk_bin(ndk)
     cxx, cc = os.path.join(tools, "clang++.exe"), os.path.join(tools, "clang.exe")
@@ -59,6 +59,7 @@ def compile_library(ndk, lifted, root, includes, shaderc_libs, out_dir, progress
     flags = [target, "-c", "-fPIC", "-O2", "-DNDEBUG", "-fsigned-char", "-I", runtime, "-I", lifted, "-I", glue]
     for inc in includes:
         flags += ["-I", inc]
+    flags += list(extra_flags)
     sources = [(os.path.join(runtime, n + ".cpp"), []) for n in RUNTIME_SOURCES]
     sources += [(f, []) for f in glob.glob(os.path.join(runtime, "hle", "*.cpp"))]
     sources += [(f, []) for f in glob.glob(os.path.join(runtime, "gpu", "*.cpp"))]

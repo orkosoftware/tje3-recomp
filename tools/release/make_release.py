@@ -194,6 +194,52 @@ def add_android(setup, sdk, shaderc, licenses):
                 "see their licence files here.\n")
 
 
+def android_app(out_apk, lifted, sdk, shaderc, vulkan, key_path):
+    """The Android app for sharing: the game's translated program and no game files.
+    On first launch it copies the player's own disc image or game folder into itself."""
+    sys.path[:0] = [os.path.join(REPO, "tools", "android"), os.path.join(REPO, "tools")]
+    import android_build
+    import xbox_texture
+    newest = lambda pattern: sorted(glob.glob(pattern))[-1]
+    ndk = newest(os.path.join(sdk, "ndk", "*"))
+    work = out_apk + ".work"
+    if os.path.isdir(work):
+        shutil.rmtree(work)
+    os.makedirs(work)
+    libs = sorted(glob.glob(os.path.join(shaderc, "*.a")))
+    includes = [os.path.join(ndk, "sources", "third_party", "shaderc", "libshaderc", "include"), os.path.join(vulkan, "Include")]
+    # No folder names from this PC inside the program.
+    hide = [f"-ffile-prefix-map={p}=." for p in (REPO, REPO.replace("\\", "/"), os.path.abspath(lifted), os.path.abspath(lifted).replace("\\", "/"))]
+    so = android_build.compile_library(ndk, lifted, REPO, includes, libs, work, extra_flags=hide)
+    sys.path.insert(0, os.path.join(REPO, "tools", "emu"))
+    from xbe_image import XbeImage
+    # The icon is the game's own title image, read from the disc at release time; it isn't kept in the source.
+    size, rgba = xbox_texture.title_image(XbeImage(os.path.join(GAME_DATA, "default.xbe")))
+    icon = os.path.join(work, "icon.png")
+    xbox_texture.write_png(icon, size, size, rgba)
+    skeleton = android_build.make_skeleton(os.path.join(newest(os.path.join(sdk, "build-tools", "*")), "aapt2.exe"),
+                                           os.path.join(newest(os.path.join(sdk, "platforms", "android-*")), "android.jar"),
+                                           work, lambda p: xbox_texture.write_png(p, 1, 1, bytes(4)))
+    with open(icon, "rb") as f:
+        png = f.read()
+    if not os.path.exists(key_path):
+        sys.exit(f"RELEASE STOPPED: no signing key at {key_path}. Every version must be signed with the same key.")
+    android_build.package(skeleton, so, png, android_build.load_key(key_path), out_apk)
+    shutil.rmtree(work)
+    # The app holds the game's program by design; it must still hold none of its files and no private names.
+    with zipfile.ZipFile(out_apk) as z:
+        names = z.namelist()
+        blob = b"".join(z.read(n) for n in names).lower()
+    problems = [f"game files inside the app: {n}" for n in names if n.startswith("assets/")]
+    problems += [f"private name inside the app: {s.decode(errors='replace')}" for s in private_names()[1] if s in blob]
+    if problems:
+        os.remove(out_apk)
+        for problem in problems:
+            print(problem)
+        sys.exit(f"RELEASE STOPPED: {len(problems)} problem(s) in the Android app")
+    print(f"{out_apk}: {os.path.getsize(out_apk) >> 20} MB")
+
+
 def package(dst, vulkan, android_sdk, shaderc, version):
     setup = os.path.join(dst, "setup")
     licenses = os.path.join(dst, "licenses")
@@ -315,8 +361,10 @@ def main():
     a.add_argument("--vulkan", required=True)
     a.add_argument("--android-sdk", required=True)
     a.add_argument("--shaderc", required=True, help="folder of shaderc .a files built for arm64-v8a")
-    a.add_argument("--version", default="v1.0.1")
+    a.add_argument("--version", default="v1.1.0")
     a.add_argument("--no-zip", action="store_true")
+    a.add_argument("--android-lifted", help="folder of the game's translated C++ (build/recomp_all): also builds the Android app")
+    a.add_argument("--android-key", default=os.path.join(REPO, "userdata", "release_signing_key.json"))
     args = a.parse_args()
     out = os.path.abspath(args.out)
     if os.path.isdir(out):
@@ -333,6 +381,9 @@ def main():
         path = os.path.join(out, f"TJE3-Recomp-Windows-x64-{args.version}.zip")
         make_zip(pkg, path)
         print(f"{path}: {os.path.getsize(path) >> 20} MB")
+    if args.android_lifted:
+        android_app(os.path.join(out, f"TJE3-Recomp-Android-arm64-{args.version}.apk"), args.android_lifted,
+                    args.android_sdk, args.shaderc, args.vulkan, args.android_key)
 
 
 if __name__ == "__main__":

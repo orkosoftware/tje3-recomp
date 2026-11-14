@@ -1,11 +1,14 @@
 # tje3-recomp
 
-An unofficial native Windows version of **ToeJam & Earl III: Mission to Earth** (original Xbox, USA), made by static
+An unofficial native Windows and Android version of **ToeJam & Earl III: Mission to Earth** (original Xbox, USA), made by static
 recompilation. It runs on Vulkan, not in an emulator.
 
-**This project contains none of the game's code or data.** You need your own copy of the game. The setup step
-translates and compiles the game's program on your PC, so the result only ever exists on your computer. Please don't
-share the resulting `game` folder.
+**You need your own copy of the game.** This repository and the Windows download contain none of the game's code or
+data: the setup step translates and compiles the game's program on your PC, so the result only ever exists on your
+computer. Please don't share the resulting `game` folder.
+
+The Android download works the way most recompilation projects do: the app holds the game's program in translated
+form, and none of its graphics, sound, levels or other files. It can't do anything until you give it your own copy.
 
 This project isn't affiliated with or endorsed by the game's developers, publishers or rights holders, or by
 Microsoft. It was written with AI assistance (Claude).
@@ -30,12 +33,25 @@ Microsoft. It was written with AI assistance (Claude).
 
 Nothing needs installing in Windows, and no admin rights are needed.
 
-## Android (optional)
+## Android
 
-Setup can also build an app for your own arm64 Android device. Tick the Android box: this downloads Google's Android
-NDK (about 750 MB) straight from Google, under Google's own terms, and writes `tje3.apk` and instructions to the
-`Android` folder in your install folder. That one file holds the game and your downloadable content, and unpacks itself
-on first launch. It's built from your disc, so please don't share it.
+For arm64 devices with Android 9 or later and Vulkan 1.1.
+
+1. Copy your disc image (`.iso`) or extracted game folder anywhere on the device's storage or memory card. Do the
+   same with any downloadable content folders you have.
+2. Install the `.apk` from the [Releases](../../releases/latest) page and open it.
+3. Allow access to files when asked. The app needs it only to find your copy of the game.
+4. The app searches the device, shows the copy and the content packs it found, and copies them into itself. On a
+   large memory card the search can take a minute. Keep about 3 GB free on internal storage.
+
+After that the game starts straight away, and you can delete your copy from the device. Saved games are in
+`Android/data/com.orkosoftware.tje3/files`. Uninstalling the app deletes them, so copy that folder somewhere safe
+first.
+
+**From a PC instead:** Windows setup can also build an app with your game already inside it. Tick the Android box:
+this downloads Google's Android NDK (about 750 MB) straight from Google, under Google's own terms, and writes
+`tje3.apk` to the `Android` folder in your install folder. It's built from your disc, so please don't share it. It
+is signed differently from the download above, so uninstall one before installing the other.
 
 ## Playing
 

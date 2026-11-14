@@ -1409,6 +1409,79 @@ void android_show_progress(float fraction) {
     if (vkQueuePresentKHR(g_queue, &pi) == VK_ERROR_OUT_OF_DATE_KHR) g_sc_dirty = true;
 }
 
+// The size a picture for android_show_pixels must have; false while there is no screen to draw on.
+bool android_screen_size(uint32_t* w, uint32_t* h) {
+    std::lock_guard<std::recursive_mutex> lk(g_mu);
+    if (!g_surface) return false;
+    if (window_take_resized()) g_sc_dirty = true;
+    if (g_sc_dirty || !g_swapchain) {
+        vkDeviceWaitIdle(g_dev);
+        create_swapchain();
+        if (!g_swapchain || g_sc_dirty) return false;
+    }
+    *w = g_sc_extent.width;
+    *h = g_sc_extent.height;
+    return true;
+}
+
+// Shows a full-screen picture (bytes R, G, B, A), for the first-launch setup screens.
+bool android_show_pixels(const uint8_t* rgba, uint32_t w, uint32_t h) {
+    std::lock_guard<std::recursive_mutex> lk(g_mu);
+    uint32_t sw, sh;
+    if (!android_screen_size(&sw, &sh) || sw != w || sh != h) return false;
+    static Buffer pic;
+    static uint32_t pic_bytes = 0;
+    static VkFence fence = VK_NULL_HANDLE;
+    const uint32_t bytes = w * h * 4;
+    if (pic_bytes != bytes) {
+        vkDeviceWaitIdle(g_dev);
+        if (pic.buf) {
+            vkDestroyBuffer(g_dev, pic.buf, nullptr);
+            vkFreeMemory(g_dev, pic.mem, nullptr);
+        }
+        pic = Buffer{};
+        pic_bytes = 0;
+        if (!make_buffer(bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, pic)) return false;
+        pic_bytes = bytes;
+    }
+    if (!fence) {
+        VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        vkCreateFence(g_dev, &fi, nullptr, &fence);
+    }
+    if (g_sc_format == VK_FORMAT_B8G8R8A8_UNORM) {
+        uint8_t* o = (uint8_t*)pic.ptr;
+        for (uint32_t i = 0; i < bytes; i += 4) {
+            o[i] = rgba[i + 2]; o[i + 1] = rgba[i + 1]; o[i + 2] = rgba[i]; o[i + 3] = 0xff;
+        }
+    } else {
+        std::memcpy(pic.ptr, rgba, bytes);
+    }
+    uint32_t image = 0;
+    vkResetFences(g_dev, 1, &fence);
+    if (vkAcquireNextImageKHR(g_dev, g_swapchain, UINT64_MAX, VK_NULL_HANDLE, fence, &image) != VK_SUCCESS) {
+        g_sc_dirty = true;
+        return false;
+    }
+    vkWaitForFences(g_dev, 1, &fence, VK_TRUE, UINT64_MAX);
+    const VkImage target = g_sc_images[image];
+    one_shot([&](VkCommandBuffer cb) {
+        barrier(cb, target, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+        VkBufferImageCopy r{};
+        r.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        r.imageExtent = {w, h, 1};
+        vkCmdCopyBufferToImage(cb, pic.buf, target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &r);
+        barrier(cb, target, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                VK_ACCESS_TRANSFER_WRITE_BIT, 0, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+    });
+    VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+    pi.swapchainCount = 1;
+    pi.pSwapchains = &g_swapchain;
+    pi.pImageIndices = &image;
+    if (vkQueuePresentKHR(g_queue, &pi) == VK_ERROR_OUT_OF_DATE_KHR) g_sc_dirty = true;
+    return true;
+}
+
 void android_surface_ready(void* window) {
     if (!g_active) return;
     std::lock_guard<std::recursive_mutex> lk(g_mu);

@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-          package="com.orkosoftware.tje3" android:versionCode="2" android:versionName="1.0.1">
+          package="com.orkosoftware.tje3" android:versionCode="3" android:versionName="1.1.0">
   <uses-feature android:name="android.hardware.vulkan.version" android:version="0x401000" android:required="true"/>
+  <!-- To find the player's own disc image or game folder on first launch. -->
+  <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
+  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
   <application android:label="ToeJam &amp; Earl III" android:icon="@mipmap/ic_launcher" android:hasCode="false" android:extractNativeLibs="true"
+               android:requestLegacyExternalStorage="true"
                android:hasFragileUserData="true" android:isGame="true" android:appCategory="game">
     <activity android:name="android.app.NativeActivity" android:exported="true"
               android:screenOrientation="landscape"
