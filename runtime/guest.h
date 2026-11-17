@@ -71,4 +71,6 @@ void without_gil(const std::function<void()>& fn);   // host wait with the guest
 extern FILE* g_log;
 bool log_enabled(const char* channel);
 
+void menu_install();        // hle/menu.cpp: hooks the menu additions that are reached indirectly
+
 }  // namespace tje

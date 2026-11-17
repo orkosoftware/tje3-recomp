@@ -50,8 +50,39 @@ ANativeWindow* g_window = nullptr;
 bool g_resumed = false;
 AAssetManager* g_assets = nullptr;
 std::atomic<bool> g_resized{false};
-std::atomic<uint32_t> g_keys{0}, g_hat{0};
-std::atomic<float> g_lx{0}, g_ly{0}, g_rx{0}, g_ry{0}, g_lt{0}, g_rt{0};
+// One per Xbox port. A controller takes the lowest free port the first time it sends
+// anything, and keeps it until Android no longer knows the device. Port 0 also gets
+// keys from anything that is not a controller.
+constexpr int32_t kNoDevice = INT32_MIN;
+struct Pad {
+    std::atomic<int32_t> device{kNoDevice};
+    std::atomic<uint32_t> keys{0}, hat{0};
+    std::atomic<float> lx{0}, ly{0}, rx{0}, ry{0}, lt{0}, rt{0};
+    void release() { keys = 0; hat = 0; lx = 0; ly = 0; rx = 0; ry = 0; lt = 0; rt = 0; }
+};
+Pad g_pads[4];
+
+void release_all_keys() {
+    for (Pad& p : g_pads) p.keys = 0;
+}
+
+Pad& pad_for(const AInputEvent* e) {
+    int32_t source = AInputEvent_getSource(e);
+    bool controller = (source & AINPUT_SOURCE_GAMEPAD) == AINPUT_SOURCE_GAMEPAD ||
+                      (source & AINPUT_SOURCE_JOYSTICK) == AINPUT_SOURCE_JOYSTICK;
+    if (!controller) return g_pads[0];
+    int32_t id = AInputEvent_getDeviceId(e);
+    for (Pad& p : g_pads)
+        if (p.device == id) return p;
+    for (Pad& p : g_pads)
+        if (p.device == kNoDevice) {
+            p.release();
+            p.device = id;
+            hle_log("[input] controller (device %d) is player %d", id, (int)(&p - g_pads) + 1);
+            return p;
+        }
+    return g_pads[0];
+}
 std::atomic<float> g_tap_x{0}, g_tap_y{0};
 std::atomic<bool> g_tapped{false};
 std::atomic<uint32_t> g_pressed{0};
@@ -83,20 +114,22 @@ int32_t on_input(android_app*, AInputEvent* e) {
     if (AInputEvent_getType(e) == AINPUT_EVENT_TYPE_KEY) {
         uint32_t bit = key_bit(AKeyEvent_getKeyCode(e));
         if (!bit) return 0;                 // volume and so on stay with the system
-        if (AKeyEvent_getAction(e) == AKEY_EVENT_ACTION_DOWN) { g_keys |= bit; g_pressed |= bit; }
-        else if (AKeyEvent_getAction(e) == AKEY_EVENT_ACTION_UP) g_keys &= ~bit;
+        Pad& pad = pad_for(e);
+        if (AKeyEvent_getAction(e) == AKEY_EVENT_ACTION_DOWN) { pad.keys |= bit; g_pressed |= bit; }
+        else if (AKeyEvent_getAction(e) == AKEY_EVENT_ACTION_UP) pad.keys &= ~bit;
         return 1;
     }
     if (AInputEvent_getType(e) == AINPUT_EVENT_TYPE_MOTION && (AInputEvent_getSource(e) & AINPUT_SOURCE_JOYSTICK)) {
         auto axis = [&](int32_t a) { return AMotionEvent_getAxisValue(e, a, 0); };
-        g_lx = axis(AMOTION_EVENT_AXIS_X);
-        g_ly = axis(AMOTION_EVENT_AXIS_Y);
-        g_rx = axis(AMOTION_EVENT_AXIS_Z);
-        g_ry = axis(AMOTION_EVENT_AXIS_RZ);
-        g_lt = std::max(axis(AMOTION_EVENT_AXIS_LTRIGGER), axis(AMOTION_EVENT_AXIS_BRAKE));
-        g_rt = std::max(axis(AMOTION_EVENT_AXIS_RTRIGGER), axis(AMOTION_EVENT_AXIS_GAS));
+        Pad& pad = pad_for(e);
+        pad.lx = axis(AMOTION_EVENT_AXIS_X);
+        pad.ly = axis(AMOTION_EVENT_AXIS_Y);
+        pad.rx = axis(AMOTION_EVENT_AXIS_Z);
+        pad.ry = axis(AMOTION_EVENT_AXIS_RZ);
+        pad.lt = std::max(axis(AMOTION_EVENT_AXIS_LTRIGGER), axis(AMOTION_EVENT_AXIS_BRAKE));
+        pad.rt = std::max(axis(AMOTION_EVENT_AXIS_RTRIGGER), axis(AMOTION_EVENT_AXIS_GAS));
         float hx = axis(AMOTION_EVENT_AXIS_HAT_X), hy = axis(AMOTION_EVENT_AXIS_HAT_Y);
-        g_hat = (hy < -0.5f ? KEY_UP : 0) | (hy > 0.5f ? KEY_DOWN : 0) | (hx < -0.5f ? KEY_LEFT : 0) | (hx > 0.5f ? KEY_RIGHT : 0);
+        pad.hat = (hy < -0.5f ? KEY_UP : 0) | (hy > 0.5f ? KEY_DOWN : 0) | (hx < -0.5f ? KEY_LEFT : 0) | (hx > 0.5f ? KEY_RIGHT : 0);
         return 1;
     }
     if (AInputEvent_getType(e) == AINPUT_EVENT_TYPE_MOTION && (AInputEvent_getSource(e) & AINPUT_SOURCE_TOUCHSCREEN) &&
@@ -142,14 +175,14 @@ void on_command(android_app* app, int32_t cmd) {
         break;
     case APP_CMD_PAUSE:
         hle_log("[window] paused");
-        g_keys = 0;
+        release_all_keys();
         set_resumed(false);
         break;
     case APP_CMD_DESTROY:
         hle_log("[window] closed by the system");
         _exit(0);
     case APP_CMD_LOST_FOCUS:
-        g_keys = 0;
+        release_all_keys();
         break;
     }
 }
@@ -206,8 +239,53 @@ void window_client_size(int* w, int* h) {
 
 void window_set_fullscreen(bool) {}
 bool window_take_resized() { return g_resized.exchange(false); }
-uint32_t window_keys() { return g_keys.load() | g_hat.load(); }
-HandheldPad window_pad() { return {g_lx, g_ly, g_rx, g_ry, g_lt, g_rt}; }
+uint32_t window_keys() {                // every controller together (menus, first-launch setup)
+    uint32_t keys = 0;
+    for (const Pad& p : g_pads) keys |= p.keys.load() | p.hat.load();
+    return keys;
+}
+uint32_t window_port_keys(int port) { return g_pads[port & 3].keys.load() | g_pads[port & 3].hat.load(); }
+HandheldPad window_pad(int port) {
+    const Pad& p = g_pads[port & 3];
+    return {p.lx, p.ly, p.rx, p.ry, p.lt, p.rt};
+}
+
+// Frees the port of a controller Android no longer knows (InputDevice.getDevice(id) == null).
+// Called from the game's thread, once a second at most.
+static void drop_missing_pads() {
+    static auto next = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+    if (now < next || !g_activity) return;
+    next = now + std::chrono::seconds(1);
+    bool any = false;
+    for (int i = 1; i < 4; i++) any |= g_pads[i].device != kNoDevice;
+    if (!any) return;                                   // the usual case: one controller
+    JavaVM* vm = g_activity->vm;
+    JNIEnv* env = nullptr;
+    if (vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK && vm->AttachCurrentThread(&env, nullptr) != JNI_OK) return;
+    jclass cls = env->FindClass("android/view/InputDevice");
+    jmethodID get = cls ? env->GetStaticMethodID(cls, "getDevice", "(I)Landroid/view/InputDevice;") : nullptr;
+    if (!get) { env->ExceptionClear(); return; }
+    for (int i = 0; i < 4; i++) {
+        int32_t id = g_pads[i].device;
+        if (id == kNoDevice) continue;
+        jobject dev = env->CallStaticObjectMethod(cls, get, id);
+        if (env->ExceptionCheck()) { env->ExceptionClear(); continue; }
+        if (dev) { env->DeleteLocalRef(dev); continue; }
+        hle_log("[input] controller (device %d) of player %d has gone", id, i + 1);
+        g_pads[i].release();
+        g_pads[i].device = kNoDevice;
+    }
+    env->DeleteLocalRef(cls);
+}
+
+uint32_t window_ports() {
+    drop_missing_pads();
+    uint32_t mask = 1;
+    for (int i = 1; i < 4; i++)
+        if (g_pads[i].device != kNoDevice) mask |= 1u << i;
+    return mask;
+}
 
 bool window_foreground() {
     std::lock_guard<std::mutex> lk(g_m);

@@ -133,6 +133,14 @@ bool window_create(int width, int height, bool fullscreen, const char* title, Na
         wc.hInstance = inst;
         wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
         wc.lpszClassName = L"tje3";
+        // The icon setup made from the player's own disc, beside the program.
+        wchar_t icon[MAX_PATH + 16];
+        DWORD len = GetModuleFileNameW(nullptr, icon, MAX_PATH);
+        while (len && icon[len - 1] != L'\\' && icon[len - 1] != L'/') len--;
+        lstrcpyW(icon + len, L"tje3.ico");
+        wc.hIcon = (HICON)LoadImageW(nullptr, icon, IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE);
+        HICON small_icon = (HICON)LoadImageW(nullptr, icon, IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+                                             GetSystemMetrics(SM_CYSMICON), LR_LOADFROMFILE);
         RegisterClassW(&wc);
         RECT r{0, 0, width, height};
         DWORD style = WS_OVERLAPPEDWINDOW;
@@ -141,6 +149,7 @@ bool window_create(int width, int height, bool fullscreen, const char* title, Na
         HWND h = CreateWindowExW(0, wc.lpszClassName, wt.c_str(), style, CW_USEDEFAULT, CW_USEDEFAULT,
                                  r.right - r.left, r.bottom - r.top, nullptr, nullptr, inst, nullptr);
         if (h) {
+            if (small_icon) SendMessageW(h, WM_SETICON, ICON_SMALL, (LPARAM)small_icon);
             if (fullscreen) set_fullscreen(h, true);
             ShowWindow(h, SW_SHOW);
             SetForegroundWindow(h);

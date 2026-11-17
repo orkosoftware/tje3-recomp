@@ -205,6 +205,7 @@ int main(int argc, char** argv) {
     gopt.fullscreen = !windowed && setting_bool("fullscreen");
 
     for (unsigned i = 0; i < kLiftedCount; i++) register_fn(kLifted[i].addr, kLifted[i].fn);
+    menu_install();
     register_hle_libs();
     install_gameplay_options();
     int missing = kernel_install(thunks);

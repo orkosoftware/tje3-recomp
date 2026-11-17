@@ -57,6 +57,9 @@ is signed differently from the download above, so uninstall one before installin
 
 - Xbox-style controllers work. Keyboard: arrows = d-pad, Enter = Start, Esc = Back, Z/Space = A, X = B, A = X, S = Y,
   Q/W = triggers, C/V = white/black.
+- Two players: connect a second controller and it becomes player two (up to four controllers are seen). The keyboard
+  is always player one. On Android, the device's own controls are player one and a connected controller is player two.
+- Menus wrap around: up from the first entry goes to the last.
 - **Display Settings** is at the bottom of the game's Options menu: Original 4:3, true Widescreen (a wider view, with
   menus and HUD kept in shape), Stretch or Sharp Pixels, plus resolution, smoothing, V-Sync and fullscreen. Changes
   apply straight away. `TJE3.exe` has a Settings button with the same options and a few more.

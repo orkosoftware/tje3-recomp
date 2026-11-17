@@ -69,6 +69,7 @@ uint32_t g_ps_constants[8];               // SetPixelShaderConstant values (D3DC
 uint8_t g_ps_constants_set = 0;           // registers set since SetPixelShader
 uint32_t g_dump_frame = 0;                // TJE_DRAW_FRAME: log every draw of this frame
 uint32_t g_constant_mode = 0;
+int32_t g_viewport[4] = {};         // SetViewport's rectangle {x1, y1, x2, y2}; x2 = 0: the whole target
 
 struct VertexShader { uint32_t function = 0; };
 std::map<uint32_t, VertexShader> g_vshaders;
@@ -363,6 +364,7 @@ void build_draw(gpu::Draw& d, uint32_t prim, uint32_t count) {
     Desc rt = describe(g_render_target);
     d.surface_w = (float)rt.width;
     d.surface_h = (float)rt.height;
+    std::memcpy(d.clip, g_viewport, sizeof d.clip);
     d.flat = R32(kActiveCamera + 0x3c) == 0x3f800000;     // an orthographic projection: the game's 2D camera
     d.zmax = g_zbuffer ? depth_range(describe(g_zbuffer).format) : 16777215.0f;
     d.fog_color = g_fog_color;
@@ -615,6 +617,7 @@ void hle_00166d00(Cpu* c) { D3DLOG(c, "D3DDevice_GetDepthStencilSurface2"); addr
 void hle_00165590(Cpu* c) { D3DLOG(c, "D3DDevice_SetRenderTarget");                   // SetRenderTarget(pRT, pZ)
     if (A(c, 0)) g_render_target = A(c, 0);
     g_zbuffer = A(c, 1);
+    std::memset(g_viewport, 0, sizeof g_viewport);        // D3D resets the viewport to the whole target
     select_render_target();
     if (log_enabled("rt")) {
         auto d = [](uint32_t s) { return s ? describe(s) : Desc{}; };
@@ -747,7 +750,9 @@ void hle_001697a0(Cpu* c) { D3DLOG(c, "D3DDevice_Clear");
     std::vector<int32_t> r;
     for (uint32_t i = 0; rects && i < n; i++)
         for (int k = 0; k < 4; k++) r.push_back((int32_t)R32(rects + i * 16 + k * 4));
-    gpu::clear(A(c, 2), A(c, 3), f32(A(c, 4)), A(c, 5), r.data(), rects ? n : 0);
+    // With no rectangles, D3D clears the viewport (one player's part of a split screen), not the whole target.
+    if (!(rects && n) && g_viewport[2]) gpu::clear(A(c, 2), A(c, 3), f32(A(c, 4)), A(c, 5), g_viewport, 1);
+    else gpu::clear(A(c, 2), A(c, 3), f32(A(c, 4)), A(c, 5), r.data(), rects ? n : 0);
     RET(c, 0, 6);
 }
 
@@ -901,7 +906,8 @@ void wrap_000f2410(Cpu* c) {
     const uint32_t cam = kActiveCamera;
     if (R32(cam + 0x3c) != 0 || f32(R32(cam + 0x38)) != -1.0f) return;           // not a perspective camera
     const float w = f32(R32(cam + 0x88)), h = f32(R32(cam + 0x8c)), shape = f32(R32(cam + 0xb0));
-    if (w != 640.0f || h != 480.0f || shape <= 0.0f) return;                     // not drawing the screen
+    // The whole screen, or one player's half of a split one.
+    if (w != 640.0f || (h != 480.0f && h != 240.0f) || shape <= 0.0f) return;
     const float ys = f32(R32(cam + 0x14));
     const float xs = ys / ((w / h) * shape) / wide;
     if (!(xs > 0.0f)) return;
@@ -917,6 +923,11 @@ void hle_00166d20(Cpu* c) { D3DLOG(c, "D3DDevice_SetViewport");
     uint32_t vp = A(c, 0);
     float x = (float)R32(vp), y = (float)R32(vp + 4), w = (float)R32(vp + 8), h = (float)R32(vp + 12);
     float minz = f32(R32(vp + 16)), maxz = f32(R32(vp + 20));
+    const int32_t rect[4] = {(int32_t)R32(vp), (int32_t)R32(vp + 4), (int32_t)(R32(vp) + R32(vp + 8)), (int32_t)(R32(vp + 4) + R32(vp + 12))};
+    if (log_enabled("viewport") && std::memcmp(rect, g_viewport, sizeof rect))
+        hle_log("[d3d] viewport %d,%d to %d,%d (z %g..%g, constant mode %x) frame %u", rect[0], rect[1], rect[2], rect[3],
+                minz, maxz, g_constant_mode, g_frames);
+    std::memcpy(g_viewport, rect, sizeof rect);
     const float zscale = g_zbuffer ? depth_range(describe(g_zbuffer).format) : 16777215.0f;
     if (!(g_constant_mode & 0x10)) {           // D3D writes the viewport transform to c[-38], c[-37]
         float scale[4] = {w / 2, -h / 2, (maxz - minz) * zscale, 0.0f};

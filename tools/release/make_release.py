@@ -361,7 +361,7 @@ def main():
     a.add_argument("--vulkan", required=True)
     a.add_argument("--android-sdk", required=True)
     a.add_argument("--shaderc", required=True, help="folder of shaderc .a files built for arm64-v8a")
-    a.add_argument("--version", default="v1.1.0")
+    a.add_argument("--version", default="v1.1.1")
     a.add_argument("--no-zip", action="store_true")
     a.add_argument("--android-lifted", help="folder of the game's translated C++ (build/recomp_all): also builds the Android app")
     a.add_argument("--android-key", default=os.path.join(REPO, "userdata", "release_signing_key.json"))

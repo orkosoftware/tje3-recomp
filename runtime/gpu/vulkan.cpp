@@ -1810,6 +1810,17 @@ void draw(const Draw& d) {
     if (d.tex[0].addr) flat_scale = -flat_scale;
     float pc[4] = {d.surface_w, d.surface_h, d.zmax, flat_scale};
     vkCmdPushConstants(cb, g_pl, VK_SHADER_STAGE_VERTEX_BIT, 0, 16, pc);
+    {   // Nothing draws outside the game's viewport (a player's part of a split screen).
+        VkRect2D sc{{0, 0}, {g_rt_w, g_rt_h}};
+        if (d.clip[2] > d.clip[0] && d.clip[3] > d.clip[1]) {
+            const float sx = (float)g_rt_w / g_cur_color->nw, sy = (float)g_rt_h / g_cur_color->nh;
+            const int32_t x1 = std::max(0, (int32_t)(d.clip[0] * sx)), y1 = std::max(0, (int32_t)(d.clip[1] * sy));
+            const int32_t x2 = std::min((int32_t)g_rt_w, (int32_t)(d.clip[2] * sx + 0.5f));
+            const int32_t y2 = std::min((int32_t)g_rt_h, (int32_t)(d.clip[3] * sy + 0.5f));
+            if (x2 > x1 && y2 > y1) sc = {{x1, y1}, {(uint32_t)(x2 - x1), (uint32_t)(y2 - y1)}};
+        }
+        vkCmdSetScissor(cb, 0, 1, &sc);
+    }
     float bc[4];
     rgba_from_d3dcolor(d.rs.blend_color, bc);
     vkCmdSetBlendConstants(cb, bc);

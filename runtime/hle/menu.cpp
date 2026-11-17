@@ -3,6 +3,9 @@
 //   - "Exit Game" at the bottom of the main menu (the Xbox had a power button);
 //   - "Display Settings" at the bottom of Options: a page of picture options
 //     that apply while the game runs. A changes the selected one, B goes back.
+// The highlight also wraps around: up from the first entry goes to the last, and
+// down from the last to the first.
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -134,7 +137,78 @@ void quit() {
 #endif
 }
 
+// ---- wrap-around ----
+// The menu keeps its items in a list: next at +0, previous at +4, with an empty
+// node at each end. Items with bit 1 of +0x38 set can't be selected.
+const uint32_t kMenuUpdate = 0x579d0;           // the menu's every-frame function (menu in ecx)
+const uint32_t kMenuBusy = 0x70, kMenuBusy2 = 0x74, kMenuRepeat = 0x7c, kMenuPlayer = 0x90;
+const uint32_t kMenuSticks = 0x50;              // per player (12 bytes apart): the up/down input, value at +0x14
+const uint32_t kMainCursor = 0x94;              // menu: selected row of the main menu
+const uint32_t kRepeatDelay = 0x3df5c28f;       // 0.12 s, set whenever up or down is acted on
+const uint32_t kStickThreshold = 0x1b2308;
+GuestFn g_menu_update = nullptr;
+
+uint32_t next_item(uint32_t item) {
+    const uint32_t n = R32(item);
+    return n && R32(n) ? n : 0;
+}
+uint32_t prev_item(uint32_t item) {
+    const uint32_t p = R32(item + 4);
+    return p && R32(p + 4) ? p : 0;
+}
+bool selectable(uint32_t item) { return !(R8(item + 0x38) & 2); }
+float guest_float(uint32_t addr) { float v; uint32_t u = R32(addr); std::memcpy(&v, &u, 4); return v; }
+
+void menu_update(Cpu* c) {
+    const uint32_t menu = c->ecx, item = R32(menu + kMenuItem), repeat = R32(menu + kMenuRepeat);
+    g_menu_update(c);
+    // Up or down was acted on this frame, and the highlight had nowhere to go.
+    if (!item || R32(menu + kMenuItem) != item || repeat == kRepeatDelay || R32(menu + kMenuRepeat) != kRepeatDelay) return;
+    if (R32(menu + kMenuBusy) || R32(menu + kMenuBusy2) || (R8(menu + 0x38) & 2)) return;
+    float push = 0;
+    for (uint32_t player = 0; player < 2 && push == 0; player++) {
+        const uint32_t who = R32(menu + kMenuPlayer);
+        if (who != player && who != 0xffffffff) continue;
+        const uint32_t input = R32(menu + kMenuSticks + 12 * player);
+        if (!input) continue;
+        const float v = guest_float(input + 0x14);
+        if (std::fabs(v) > guest_float(kStickThreshold)) push = v;
+    }
+    if (push == 0) return;
+    const bool down = push > 0;
+    if (down ? next_item(item) : prev_item(item)) {         // only from the very end of the list
+        for (uint32_t i = down ? next_item(item) : prev_item(item); i; i = down ? next_item(i) : prev_item(i))
+            if (selectable(i)) return;
+    }
+    uint32_t first = item, target = 0;
+    for (int guard = 0; prev_item(first) && guard < 64; guard++) first = prev_item(first);
+    int rows = 0, target_row = 0;
+    for (uint32_t i = first; i && rows < 64; i = next_item(i)) {
+        if (!selectable(i)) continue;
+        if (down ? !target : true) { target = i; target_row = rows; }      // down: the first; up: the last
+        rows++;
+    }
+    if (!target || target == item) return;
+    const uint32_t page = R32(menu + kMenuPage);
+    if (page == kMainMenuPage) W32(menu + kMainCursor, (uint32_t)target_row);
+    if (page == kOptionsPage) W32(menu + kOptionsCursor, (uint32_t)target_row);
+    if (log_enabled("menu")) hle_log("[menu] wrapped %s to row %d (page %u)", down ? "down" : "up", target_row, page);
+    const Cpu saved = *c;
+    c->ecx = 0x43; c->edx = 0x148;
+    call(c, 0xd57d0);                           // the menu's "moved" sound
+    c->eax = 0; c->ecx = item;
+    call(c, 0x57240, {menu});                   // un-highlight
+    c->eax = 1; c->ecx = target;
+    call(c, 0x57240, {menu});                   // highlight and select
+    *c = saved;
+}
+
 }  // namespace
+
+void menu_install() {
+    g_menu_update = lookup(kMenuUpdate);
+    if (g_menu_update) register_fn(kMenuUpdate, menu_update);
+}
 
 // Adds one menu item: previous item, row and text on the stack (popped by the
 // callee), the menu in ebx; returns the item. Rows are 64 pixels apart, and a

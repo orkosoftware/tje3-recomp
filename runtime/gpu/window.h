@@ -26,7 +26,9 @@ uint32_t window_keys();
 
 #ifdef __ANDROID__
 struct HandheldPad { float lx, ly, rx, ry, lt, rt; };      // sticks -1..1 (y down), triggers 0..1
-HandheldPad window_pad();
+HandheldPad window_pad(int port);       // port 0..3
+uint32_t window_port_keys(int port);    // KEY_* bits held on that port's controller
+uint32_t window_ports();                // ports with a controller (bit per port)
 bool window_foreground();
 void window_wait_foreground();          // returns once the player is back in the app
 void android_surface_lost();            // vulkan.cpp

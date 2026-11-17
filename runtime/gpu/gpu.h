@@ -91,6 +91,7 @@ struct Draw {
 
     float surface_w = 640, surface_h = 480, zmax = 16777215.0f;
     bool flat = false;        // drawn by the game's 2D camera (menus, HUD): keeps its shape in widescreen
+    int32_t clip[4] = {};     // the viewport {x1, y1, x2, y2} in surface pixels; nothing draws outside it. x2 = 0: none
 };
 
 // Widescreen: how many times wider than 4:3 the picture is now (1 = not widescreen).
