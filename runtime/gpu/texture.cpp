@@ -168,8 +168,10 @@ inline bool texel(uint32_t f, const uint8_t* t, const uint8_t* palette, uint8_t*
         o[0] = o[1] = o[2] = 255; o[3] = t[0]; return true;
     case 0x1a: case 0x20:                             // A8L8
         o[0] = o[1] = o[2] = t[0]; o[3] = t[1]; return true;
-    case 0x28:                                        // V8U8 (signed), biased into 0..255
-        o[0] = (uint8_t)(t[0] + 128); o[1] = (uint8_t)(t[1] + 128); o[2] = 255; o[3] = 255; return true;
+    case 0x28:                                        // G8B8 on the NV2A: the two bytes as they are, repeated (A,R,G,B = G,B,G,B).
+        // The game's water stores its ripple normals here as plain 0..255 values around 128
+        // and never asks for signed channels (D3DTSS_COLORSIGN stays 0).
+        o[0] = t[0]; o[1] = t[1]; o[2] = t[0]; o[3] = t[1]; return true;
     case 0x0b:                                        // P8: D3DCOLOR palette
         if (!palette) { o[0] = o[1] = o[2] = o[3] = 255; return true; }
         o[0] = palette[t[0] * 4 + 2]; o[1] = palette[t[0] * 4 + 1]; o[2] = palette[t[0] * 4]; o[3] = palette[t[0] * 4 + 3];

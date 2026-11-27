@@ -299,7 +299,8 @@ std::string combiners(const Draw& d, uint32_t kinds) {
     uint32_t count_word = p[0xd4 / 4], tex_modes = p[0xd8 / 4];
     uint32_t stages = count_word & 0xff;
     if (stages > 8) stages = 8;
-    bool unique_c0 = count_word & 0x10000, unique_c1 = count_word & 0x100000, mux_msb = count_word & 0x100;
+    // PS_COMBINERCOUNT(count, flags) = flags << 8 | count; MUX_MSB 0x0001, UNIQUE_C0 0x0010, UNIQUE_C1 0x0100.
+    bool unique_c0 = count_word & 0x1000, unique_c1 = count_word & 0x10000, mux_msb = count_word & 0x100;
 
     std::string s = fragment_header();
     s += "void main() {\n";
